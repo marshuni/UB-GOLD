@@ -66,6 +66,13 @@ For PyTorch packages, users in China can download them from the [Nanjing Univers
 After manually configuring the PyTorch-related packages, run the following command to install the remaining Python libraries:  
 `pip install -r requirements.txt`  
 
+### Troubleshooting  
+If you encounter errors related to missing OpenSSL libraries, you can refer to [this tutorial](https://blog.csdn.net/m0_65803902/article/details/142686409) to install the required dependencies.  
+
+If you see the error `ModuleNotFoundError: No module named 'torch.utils._import_utils'`, ensure that you are using the correct versions of `torch` and `torchdata`:  
+- `torch==2.1.0`  
+- `torchdata==0.7.0`  
+
 ## Codebase Folder
 
 ```
