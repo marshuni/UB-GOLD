@@ -475,6 +475,35 @@ def get_ad_dataset_Tox21(args, need_str_enc=True):
     #train (ID), test (ID+OOD), train dataloader, test dataloader, meta
     return data_train,data_val, data_test, dataloader_train,dataloader_val, dataloader_test, meta
 
+def get_ad_dataset_ABIDE(args,  need_str_enc=True):
+    from .dataset_abide import get_dataset
+    data_train = get_dataset("train")
+    data_val = get_dataset("val")
+    data_test = get_dataset("test")
+
+    if need_str_enc:
+        data_train = init_structural_encoding(data_train, rw_dim=args.rw_dim, dg_dim=args.dg_dim)
+        data_test = init_structural_encoding(data_test, rw_dim=args.rw_dim, dg_dim=args.dg_dim)
+        data_val  = init_structural_encoding(data_val, rw_dim=args.rw_dim, dg_dim=args.dg_dim)
+
+    # 获取特征数和最大节点数
+    dataset_num_features = data_train[0].num_features if len(data_train) > 0 else 0
+    max_nodes_num_train = max([_.num_nodes for _ in data_train]) if len(data_train) > 0 else 0
+    max_nodes_num_val = max([_.num_nodes for _ in data_val]) if len(data_val) > 0 else 0
+    max_nodes_num_test = max([_.num_nodes for _ in data_test]) if len(data_test) > 0 else 0
+    max_nodes_num = max(max_nodes_num_train, max_nodes_num_val, max_nodes_num_test)
+
+    dataloader_train = DataLoader(data_train, batch_size=args.batch_size, shuffle=True)
+    dataloader_val = DataLoader(data_val, batch_size=args.batch_size_test, shuffle=False)
+    dataloader_test = DataLoader(data_test, batch_size=args.batch_size_test, shuffle=False)
+
+    meta = {'num_feat': dataset_num_features, 'num_train': len(data_train), 'max_nodes_num': max_nodes_num, 'num_edge_feat': 0}
+    # 返回内容与get_ad_dataset_Tox21一致
+    return data_train, data_val, data_test, dataloader_train, dataloader_val, dataloader_test, meta
+
+
+
+
 
 def perturbation_datasets(args, split, need_str_enc=True):
     path_now =  os.path.abspath(os.path.join(os.getcwd(), "."))

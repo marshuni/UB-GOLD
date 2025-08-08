@@ -1,4 +1,5 @@
 import tqdm
+import time
 import torch
 import argparse
 import warnings
@@ -11,6 +12,7 @@ from dataloader.data_loader import *
 import pandas as pd
 import statistics
 import seaborn as sns
+from sklearn.metrics import roc_curve,accuracy_score,precision_score,f1_score,recall_score
 '''
 python benchmark/mymain.py -exp_type oodd -DS_pair BZR+COX2 -num_epoch 400 -num_cluster 2 -alpha 0
 oodd:inter datasets OOD,ood:intra dataset OOD,ad :anomaly detection（tox/TU）
@@ -44,7 +46,8 @@ def save_results_csv(model_result, model_name):
 
     print(f'Saved results to {filename}')
     
-def process_model_results(auc, ap, rec, args):
+def process_model_results(auc, ap, rec, args, para_size, train_time, 
+                          acc, pre, recall, f1):
     auc_final = sum(auc) / len(auc)
     ap_final = sum(ap) / len(ap)
     rec_final = sum(rec) / len(rec)
@@ -52,16 +55,28 @@ def process_model_results(auc, ap, rec, args):
     ap_variance = statistics.variance(ap)
     rec_variance = statistics.variance(rec)
 
+    para_size_final = sum(para_size) / len(para_size)
+    para_size_variance = statistics.variance(para_size) if len(para_size) > 1 else 0.0
+    train_time_final = sum(train_time) / len(train_time)
+    train_time_variance = statistics.variance(train_time) if len(train_time) > 1 else 0.0
+
+    acc_final = sum(acc) / len(acc)
+    acc_variance = statistics.variance(acc) if len(acc) > 1 else 0.0
+    pre_final = sum(pre) / len(pre)
+    pre_variance = statistics.variance(pre) if len(pre) > 1 else 0.0
+    recall_final = sum(recall) / len(recall)
+    recall_variance = statistics.variance(recall) if len(recall) > 1 else 0.0
+    f1_final = sum(f1) / len(f1)
+    f1_variance = statistics.variance(f1) if len(f1) > 1 else 0.0
+
     model_result = {}
     file_id = args.model  
-    
-    
+
     if args.exp_type == 'oodd':
         key_prefix = args.DS_pair
     else:
         key_prefix = args.DS
-    
-    
+
     model_result['Dataset'] = key_prefix
     model_result['AUROC'] = f"{auc_final * 100:.2f}%"
     model_result['AUROC_Var'] = f"{auc_variance * 100:.2f}%"
@@ -69,6 +84,20 @@ def process_model_results(auc, ap, rec, args):
     model_result['AUPRC_Var'] = f"{ap_variance * 100:.2f}%"
     model_result['FPR95'] = f"{rec_final * 100:.2f}%"
     model_result['FPR95_Var'] = f"{rec_variance * 100:.2f}%"
+    model_result['Para_Size'] = f"{para_size_final:.2f}"
+    model_result['Para_Size_Var'] = f"{para_size_variance:.2f}"
+    model_result['Train_Time'] = f"{train_time_final:.4f}"
+    model_result['Train_Time_Var'] = f"{train_time_variance:.4f}"
+
+    model_result['ACC'] = f"{acc_final * 100:.2f}%"
+    model_result['ACC_Var'] = f"{acc_variance * 100:.2f}%"
+    model_result['PRE'] = f"{pre_final * 100:.2f}%"
+    model_result['PRE_Var'] = f"{pre_variance * 100:.2f}%"
+    model_result['RECALL'] = f"{recall_final * 100:.2f}%"
+    model_result['RECALL_Var'] = f"{recall_variance * 100:.2f}%"
+    model_result['F1'] = f"{f1_final * 100:.2f}%"
+    model_result['F1_Var'] = f"{f1_variance * 100:.2f}%"
+
 
     save_results_csv(model_result, file_id)
 
@@ -124,14 +153,35 @@ def set_seed(seed=3407):
         torch.cuda.manual_seed_all(seed)
         torch.backends.cudnn.deterministic = True
 
+def calculate_metrics(y_true, y_pred):
+    fpr, tpr, thresholds = roc_curve(y_true, y_pred)
+    # 计算最佳阈值
+    J = tpr - fpr  # Youden指数
+    best_idx = np.argmax(J)
+    best_threshold = thresholds[best_idx]
+
+    # 根据最佳阈值生成预测标签
+    y_pred_labels = (y_pred >= best_threshold).astype(int)
+    
+    # 计算评估指标
+    accuracy = accuracy_score(y_true, y_pred_labels)
+    precision = precision_score(y_true, y_pred_labels)
+    recall = recall_score(y_true, y_pred_labels)
+    f1 = f1_score(y_true, y_pred_labels)
+    return accuracy,precision,recall,f1
+
 def main(args):
     auc, ap, rec = [], [], []
+    para_size = []
+    train_time = []
+    acc, pre, recall, f1 = [],[],[],[]
     model_result = {'name': args.model}
     
     # set_seed()
     # import ipdb
     # ipdb.set_trace()
     seed = 3407
+    roc_result_list=[]
     for i in tqdm.tqdm(range(args.num_trial)):
         set_seed(seed+i)
         if args.exp_type == 'ad':
@@ -139,20 +189,22 @@ def main(args):
             print(args.exp_type)
             if args.DS.startswith('Tox21'):
                 dataset_train, dataset_val, dataset_test, dataloader, dataloader_val, dataloader_test, meta = get_ad_dataset_Tox21(args)
+            elif args.DS.startswith('ABIDE'):
+                dataset_train, dataset_val, dataset_test, dataloader, dataloader_val, dataloader_test, meta = get_ad_dataset_ABIDE(args)
             else:
                 splits = get_ad_split_TU(args, fold=args.num_trial)
         if args.exp_type == 'oodd':
             print("-------")
             print(args.exp_type)
             dataset_train, dataset_val, dataset_test, dataloader, dataloader_val, dataloader_test, meta = get_ood_dataset(args)
-        elif args.exp_type == 'ad' and not args.DS.startswith('Tox21'):
+        elif args.exp_type == 'ad' and not (args.DS.startswith('Tox21') or args.DS.startswith('ABIDE')):
             print("-------")
             print(args.exp_type)
             dataset_train, dataset_val, dataset_test, dataloader, dataloader_val, dataloader_test, meta = get_ad_dataset_TU(args, splits[i])
-        elif args.exp_type == 'ood':
-            print("-------")
-            print(args.exp_type)
-            dataset_train, dataset_val, dataset_test, dataloader, dataloader_val, dataloader_test, meta = get_ood_dataset_spilt(args)
+        # elif args.exp_type == 'ood':
+        #     print("-------")
+        #     print(args.exp_type)
+        #     dataset_train, dataset_val, dataset_test, dataloader, dataloader_val, dataloader_test, meta = get_ood_dataset_spilt(args)
             
 
         
@@ -164,6 +216,8 @@ def main(args):
 
         model = init_model(args)
         ###If you want to define your own dataloader, just pass in the dataset, dataloader=None, otherwise press the following
+        
+        start_time = time.time()
         
         if args.model == 'GOOD-D':
             print(args.model)
@@ -207,6 +261,18 @@ def main(args):
         else:
             model.fit(dataset_train)
 
+        # 统计模型参数量
+        if args.model == 'GLocalKD':
+            num_params = sum(p.numel() for p in model.model_teacher.parameters() if p.requires_grad)
+            num_params += sum(p.numel() for p in model.model_student.parameters() if p.requires_grad)
+        elif args.model == 'GLADC':
+            num_params = sum(p.numel() for p in model.NetGe.parameters() if p.requires_grad)
+        else:
+            num_params = sum(p.numel() for p in model.model.parameters() if p.requires_grad)
+        para_size.append(num_params)
+        time_cost = time.time()-start_time
+        train_time.append(time_cost)
+
         score, y_all = model.predict(dataset=dataset_test, dataloader=dataloader_test, args=args, return_score=False)
 
         # exp_dir = "results"
@@ -219,11 +285,46 @@ def main(args):
         rec.append(fpr95(y_all, score))
         auc.append(ood_auc(y_all, score))
         ap.append(ood_aupr(y_all, score))
+
+        import numpy as np
+        y_all = np.array(y_all)
+        score = np.array(score)
+        a,p,r,f = calculate_metrics(y_all,score)
+        acc.append(a)
+        pre.append(p)
+        recall.append(r)
+        f1.append(f)
+
         print("AUROC:", auc[-1])
         print("AUPRC:", ap[-1])
         print("FPR95:", rec[-1])
+
         
-    process_model_results(auc, ap, rec, args)
+        fpr, tpr, thresholds = roc_curve(y_all, score)
+
+        roc_result = {"fpr": fpr, "tpr": tpr, "thresholds": thresholds}
+        roc_result_list.append(roc_result)
+
+    # Save roc_result_list to CSV after the loop
+    import numpy as np
+    import pandas as pd
+
+
+    # Flatten all results into a DataFrame
+    all_rows = []
+    for idx, roc in enumerate(roc_result_list):
+        for i in range(len(roc["fpr"])):
+            all_rows.append({
+            "trial": idx,
+            "fpr": roc["fpr"][i],
+            "tpr": roc["tpr"][i],
+            "threshold": roc["thresholds"][i]
+            })
+    df_roc = pd.DataFrame(all_rows)
+    df_roc.to_csv(f"./results/{args.model}_roc.csv", index=False)
+    
+    process_model_results(auc, ap, rec, args, para_size, train_time,
+                          acc, pre, recall, f1)
 
 
 if __name__ == '__main__':

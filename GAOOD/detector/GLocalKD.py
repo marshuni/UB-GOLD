@@ -102,7 +102,7 @@ class GLocalKD(DeepDetector):
                             num_layers=self.args.num_layer,
                             bn = self.args.bn,
                             args=self.args,
-                            **kwargs).to(self.device)
+                            **kwargs).to('cuda')
                 , glocalkd.GcnEncoderGraph_student(input_dim=self.args.dataset_num_features,
                             hidden_dim=self.args.hidden_dim,
                             embedding_dim=self.args.output_dim,
@@ -110,13 +110,13 @@ class GLocalKD(DeepDetector):
                             num_layers=self.args.num_layer,
                             bn = self.args.bn,
                             args=self.args,
-                            **kwargs).to(self.device))
+                            **kwargs).to('cuda'))
 
 
     def fit(self, dataset, args=None, label=None, dataloader=None,dataloader_val=None):
         self.max_nodes_num = args.max_nodes_num
 
-        self.device = torch.device('cuda:'+str(args.gpu) if torch.cuda.is_available() else 'cpu')
+        self.device = torch.device('cuda')
         self.model_teacher, self.model_student = self.init_model(**self.kwargs)
         optimizer = torch.optim.Adam(filter(lambda p : p.requires_grad, self.model_student.parameters()), lr=args.lr)
         scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=50, gamma=0.5)
@@ -213,8 +213,8 @@ class GLocalKD(DeepDetector):
         loss = []
         y = []
         emb = []
-        self.device = torch.device('cuda:' + str(args.gpu) if torch.cuda.is_available() else 'cpu')
-
+        self.device = torch.device('cuda')
+        preprocessed = []
         for batch_idx, data in enumerate(dataloader):
             adj_matrixs, _, graph_appends, graph_label = self.process_graph(data)
             preprocessed.append(tuple([adj_matrixs, graph_appends, graph_label]))
